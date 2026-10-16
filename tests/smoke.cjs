@@ -1,0 +1,40 @@
+'use strict';
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const fs=require('node:fs');
+const {pathToFileURL}=require('node:url');
+const {chromium}=require('playwright');
+(async()=>{
+ const root=path.resolve(__dirname,'..');
+ const browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-webgl','--disable-dev-shm-usage']});
+ const page=await browser.newPage({viewport:{width:932,height:430},isMobile:true,hasTouch:true,deviceScaleFactor:1});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const external=[];page.on('request',r=>{if(/^https?:/.test(r.url()))external.push(r.url())});
+ const fire=async(ms=300)=>{const before=await page.evaluate(()=>BARO.debug.stats.shots);await page.dispatchEvent('#fireButton','pointerdown',{pointerId:20,pointerType:'touch',clientX:850,clientY:280});await page.waitForFunction(before=>BARO.debug.stats.shots>before,before,{timeout:15000});await page.waitForTimeout(ms);await page.dispatchEvent('#fireButton','pointerup',{pointerId:20,pointerType:'touch'})};
+ const equip=async(index)=>{await page.locator('#weaponButton').click();await page.locator(`[data-weapon="${index}"]`).click();await page.locator('#equip').click();await page.waitForTimeout(160)};
+ const goMenu=async()=>{await page.locator('#pauseButton').click();await page.locator('#quit').click()};
+ const run=async(name,fn)=>{await fn();console.log('PASS',name)};
+ try{
+ await page.goto(pathToFileURL(path.join(root,'index.html')).href);
+ await page.waitForFunction(()=>window.BARO?.debug?.state==='menu');
+ await page.waitForFunction(()=>document.querySelector('#loading').hidden);
+ await run('menu, 20 original weapons, 1000+ stage props',async()=>{const info=await page.evaluate(()=>({count:BARO.WEAPONS.length,names:new Set(BARO.WEAPONS.map(w=>w.name)).size,objects:BARO.debug.stats.staticObjects}));assert.equal(info.count,20);assert.equal(info.names,20);assert(info.objects>1000)});
+ await page.locator('#start').click();
+ await run('training: shoot, hit, eliminate, score',async()=>{await page.dispatchEvent('#fireButton','pointerdown',{pointerId:20,pointerType:'touch',clientX:850,clientY:280});await page.waitForFunction(()=>BARO.debug.stats.kills>0,{},{timeout:20000});await page.dispatchEvent('#fireButton','pointerup',{pointerId:20,pointerType:'touch'});const r=await page.evaluate(()=>BARO.debug.stats);assert(r.shots>0);assert(r.hits>0);assert(r.kills>0);assert(r.score>0);assert(r.hits<=r.shots)});
+ await run('reload finishes and restores magazine',async()=>{await page.locator('#reloadButton').click();await page.waitForFunction(()=>BARO.debug.stats.reload===0&&BARO.debug.ammo===BARO.WEAPONS[0].mag,{},{timeout:20000})});
+ await run('touch movement and release',async()=>{const b=await page.locator('#movePad').boundingBox(),x=b.x+b.width/2,y=b.y+b.height/2;await page.dispatchEvent('#movePad','pointerdown',{pointerId:9,pointerType:'touch',clientX:x,clientY:y-35});await page.waitForFunction(()=>BARO.debug.player.z<33.4,{},{timeout:10000});await page.dispatchEvent('#movePad','pointerup',{pointerId:9,pointerType:'touch',clientX:x,clientY:y-35});let before=await page.evaluate(()=>BARO.debug.player.z);assert(before<33.5);await page.waitForTimeout(200);let after=await page.evaluate(()=>BARO.debug.player.z);assert(Math.abs(before-after)<.1)});
+ await run('wall collision stops lateral motion',async()=>{await page.keyboard.down('KeyA');await page.waitForFunction(()=>BARO.debug.player.x<-16.4,{},{timeout:30000});await page.waitForTimeout(500);await page.keyboard.up('KeyA');let p=await page.evaluate(()=>BARO.debug.player);assert(p.x<-10);assert(p.x>-17);});
+ await goMenu();await page.locator('#start').click();
+ await run('all 20 weapons equip and fire without errors',async()=>{for(let i=0;i<20;i++){await equip(i);assert.equal(await page.evaluate(()=>BARO.debug.weapon),await page.evaluate(i=>BARO.WEAPONS[i].name,i));let shots=await page.evaluate(()=>BARO.debug.stats.shots);await fire(180);let n=await page.evaluate(()=>BARO.debug.stats.shots);assert(n>shots,'weapon '+i+' must fire')} });
+ await run('sniper scope and ADS exit',async()=>{await equip(11);await page.locator('#adsButton').click();await page.waitForFunction(()=>getComputedStyle(document.querySelector('#scope')).display==='block');await page.locator('#adsButton').click();await page.waitForFunction(()=>getComputedStyle(document.querySelector('#scope')).display==='none')});
+ await run('paused time does not consume ammunition',async()=>{await page.locator('#pauseButton').click();let s=await page.evaluate(()=>BARO.debug.stats.shots);await page.waitForTimeout(250);assert.equal(await page.evaluate(()=>BARO.debug.stats.shots),s);assert.equal(await page.evaluate(()=>BARO.debug.state),'paused');await page.locator('#pauseArsenal').click();await page.locator('[data-weapon="0"]').click();await page.locator('#equip').click();assert.equal(await page.evaluate(()=>BARO.debug.state),'paused');await page.locator('#resume').click()});
+ await run('jump and abilities activate',async()=>{await page.locator('#jumpButton').click();await page.waitForFunction(()=>BARO.debug.player.y>.05,{},{timeout:8000});assert((await page.evaluate(()=>BARO.debug.player.y))>0);await page.locator('#dashButton').click();await page.locator('#pulseButton').click();await page.waitForFunction(()=>document.querySelector('#pulseLabel').textContent.endsWith('s'),{},{timeout:8000});assert.match(await page.locator('#pulseLabel').innerText(),/s/)});
+ await goMenu();await page.locator('[data-mode="arena"]').click();await page.locator('#start').click();
+ await run('arena AI spawns and navigates',async()=>{let before=await page.evaluate(()=>BARO.debug.targets);assert.equal(before.length,5);await page.waitForTimeout(2500);let after=await page.evaluate(()=>BARO.debug.targets);assert(after.some((p,i)=>Math.hypot(p.x-before[i].x,p.z-before[i].z)>.3))});
+ await goMenu();await page.locator('[data-mode="breach"]').click();await page.locator('#start').click();
+ await run('breach initializes 3 relays and enemies',async()=>{assert.equal(await page.evaluate(()=>BARO.debug.relays.length),3);assert.equal(await page.evaluate(()=>BARO.debug.stats.mode),'breach');assert((await page.evaluate(()=>BARO.debug.targets.length))>=6);assert.equal(await page.locator('#objective').innerText(),'中継器を制圧 / 0 / 3')});
+ await goMenu();await page.setViewportSize({width:430,height:932});await run('portrait guidance',async()=>{assert(await page.locator('#rotate').isVisible())});await page.setViewportSize({width:932,height:430});await run('landscape viewport and no overflow',async()=>{assert(!(await page.locator('#rotate').isVisible()));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))});
+ await page.goto(pathToFileURL(path.join(root,'dist/Baro.html')).href);await page.waitForFunction(()=>window.BARO?.debug?.state==='menu');await run('standalone build works without network',async()=>{assert.equal(external.length,0);assert.equal(await page.evaluate(()=>BARO.WEAPONS.length),20)});
+ assert.deepEqual(errors,[]);console.log('ALL CHECKS PASSED / no browser exceptions / no external requests');
+ }finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});
