@@ -1,0 +1,11 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..');
+let html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+html=html.replace('<link rel="stylesheet" href="style.css">',()=>'<style>'+fs.readFileSync(path.join(root,'style.css'),'utf8')+'</style>');
+html=html.replace(/<script src="([^"]+)"><\/script>/g,(_,file)=>'<script>\n'+fs.readFileSync(path.join(root,file),'utf8').replace(/<\/script/gi,'<\\/script')+'\n</script>');
+const license=fs.readFileSync(path.join(root,'vendor/LICENSE-three.txt'),'utf8');
+html=html.replace('<!doctype html>','<!doctype html>\n<!-- Bundled with Three.js (MIT).\n'+license.replace(/--/g,'—')+'\n-->');
+fs.mkdirSync(path.join(root,'dist'),{recursive:true});
+fs.writeFileSync(path.join(root,'dist/Baro.html'),html);
+console.log('Built dist/Baro.html ('+Math.round(Buffer.byteLength(html)/1024)+' KiB), no runtime network requests.');

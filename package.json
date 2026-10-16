@@ -1,0 +1,15 @@
+{
+  "name": "baro-harbor-protocol",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobile-first original 3D tactical FPS, 20 weapons, offline assets",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "check": "node --check src/data.js && node --check src/world.js && node --check src/weapons.js && node --check src/game.js",
+    "test": "node tests/smoke.cjs",
+    "build": "node tools/build.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.51.1"
+  }
+}
